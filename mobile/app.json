@@ -1,0 +1,61 @@
+{
+  "expo": {
+    "name": "Logger Auto",
+    "slug": "logger-automotivo",
+    "description": "Diagnóstico remoto de peças automotivas monitoradas por Loggers IoT.",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "loggerauto",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#f3f5f7",
+    "ios": {
+      "bundleIdentifier": "com.loggerautomotivo.app",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        },
+        "NSLocalNetworkUsageDescription": "O Logger Auto acessa a API do backend na sua rede local."
+      }
+    },
+    "android": {
+      "package": "com.loggerautomotivo.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#111a27",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "single",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#111a27",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 96
+        }
+      ],
+      "expo-sharing",
+      "@react-native-community/datetimepicker",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "reactCompiler": true
+    }
+  }
+}
