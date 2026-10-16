@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { errorMessage, isAbortError, requestJson, requestText } from '@/api/client'
 import { useApiConfig } from '@/api/config'
-import { LEVELS, type EventItem, type EventPage, type Level } from '@/api/types'
+import { LEVELS, type EventItem, type EventPage, type Level, type Timeline, type TimelineBucket } from '@/api/types'
 import { AppText } from '@/components/app-text'
 import { Badge } from '@/components/badge'
 import { Button } from '@/components/button'
@@ -12,13 +12,16 @@ import { Card } from '@/components/card'
 import { ChipGroup } from '@/components/chip'
 import { DateTimeField } from '@/components/date-time-field'
 import { CloudDownload, Search, SlidersHorizontal } from '@/components/icons'
+import { OscillationChart } from '@/components/oscillation-chart'
 import { screenStyles } from '@/components/screen'
 import { EmptyState, ErrorState, InlineError, LoadingState } from '@/components/state-view'
 import { colors, fonts, radius, shadow } from '@/constants/theme'
+import { useApi } from '@/hooks/use-api'
 import { useDebouncedValue } from '@/hooks/use-debounced-value'
 import { buildEventParams, DEFAULT_EVENT_FILTERS, PERIOD_OPTIONS, toQueryString, type EventFilters } from '@/lib/event-query'
 import { formatDateTime, orDash, plural } from '@/lib/format'
 import { shareCsv } from '@/lib/share-csv'
+import { utcOffsetMinutes } from '@/lib/timeline'
 
 const PAGE_SIZE = 25
 const LEVEL_OPTIONS: { value: Level | ''; label: string }[] = [{ value: '', label: 'Todas' }, ...LEVELS.map(level => ({ value: level, label: level }))]
@@ -95,6 +98,14 @@ export function LogTab({ pieceId, header, onRefreshPart, onOpenDiagnosis }: {
 
   const basePath = `/api/parts/${encodeURIComponent(pieceId)}/events`
   const { period, level, start, end } = filters
+  // Instante de referência dos períodos relativos do gráfico; avança a cada atualização.
+  const [anchor, setAnchor] = useState(() => Date.now())
+  const timelinePath = useMemo(() => `/api/events/timeline${toQueryString({
+    ...buildEventParams({ period, level, event, start, end }, anchor),
+    pieceId,
+    utcOffset: utcOffsetMinutes(),
+  })}`, [anchor, end, event, level, period, pieceId, start])
+  const timeline = useApi<Timeline>(timelinePath, { keepPrevious: true })
   // Identifica a consulta atual; enquanto o resultado não for desta chave, a lista está carregando.
   const queryKey = JSON.stringify([baseUrl, basePath, period, level, event, start?.getTime() ?? null, end?.getTime() ?? null])
 
@@ -141,7 +152,9 @@ export function LogTab({ pieceId, header, onRefreshPart, onOpenDiagnosis }: {
     fetchPage(nextPage, loadMode)
   }
   const loadMore = () => { if (!initialLoading && !busy && hasMore && !moreFailed && !error) load(page + 1, 'more') }
-  const refresh = () => { load(1, 'refresh'); onRefreshPart() }
+  const refresh = () => { load(1, 'refresh'); setAnchor(Date.now()); onRefreshPart() }
+  // Toque no gráfico: o intervalo da coluna vira o período personalizado do log.
+  const applyRange = (bucket: TimelineBucket) => updateFilters({ period: 'custom', start: new Date(bucket.start), end: new Date(bucket.end) })
 
   const exportCsv = async () => {
     setExporting(true)
@@ -201,6 +214,9 @@ export function LogTab({ pieceId, header, onRefreshPart, onOpenDiagnosis }: {
           {exportError ? <AppText variant="caption" color={colors.red}>Não foi possível exportar: {exportError}</AppText> : null}
         </View>
       </Card>
+      {timeline.data ? (
+        <OscillationChart timeline={timeline.data} title="Gráfico de verificações" loading={timeline.loading} onApplyRange={applyRange} />
+      ) : timeline.error ? <InlineError message={`Gráfico indisponível: ${timeline.error}`} /> : null}
       {!initialLoading && !failedInitial ? (
         <View style={styles.summary}>
           <AppText variant="bodyStrong">{plural(count, 'registro', 'registros')}</AppText>

@@ -1,26 +1,32 @@
 import { router } from 'expo-router'
 import { StyleSheet } from 'react-native'
 
-import type { DashboardResponse } from '@/api/types'
+import type { DashboardResponse, Timeline } from '@/api/types'
 import { AppText } from '@/components/app-text'
 import { Button } from '@/components/button'
 import { Card, CardHeader } from '@/components/card'
 import { EventList } from '@/components/event-list'
 import { Radio, Search, ShieldAlert, Signal, TriangleAlert } from '@/components/icons'
 import { MetricCard, MetricGrid } from '@/components/metric-card'
+import { OscillationChart } from '@/components/oscillation-chart'
 import { PageIntro, ScreenScroll, UpdatedAt } from '@/components/screen'
 import { ErrorState, InlineError, LoadingState } from '@/components/state-view'
 import { colors, REFRESH_MS } from '@/constants/theme'
 import { useApi } from '@/hooks/use-api'
-import { openEventDiagnosis } from '@/lib/routes'
+import { openEventDiagnosis, partHref } from '@/lib/routes'
+import { utcOffsetMinutes } from '@/lib/timeline'
+
+const FLEET_TIMELINE_PATH = `/api/events/timeline?hours=24&utcOffset=${utcOffsetMinutes()}`
 
 export default function DashboardScreen() {
   const { data, error, loading, refreshing, refresh, updatedAt } = useApi<DashboardResponse>('/api/dashboard', { refreshMs: REFRESH_MS })
+  const timeline = useApi<Timeline>(FLEET_TIMELINE_PATH, { refreshMs: REFRESH_MS, keepPrevious: true })
+  const refreshAll = () => { refresh(); timeline.refresh() }
 
   return (
-    <ScreenScroll refreshing={refreshing} onRefresh={refresh}>
+    <ScreenScroll refreshing={refreshing} onRefresh={refreshAll}>
       <PageIntro eyebrow="Visão operacional" text="Resumo da frota monitorada e ocorrências que exigem atenção." />
-      {loading ? <LoadingState /> : !data ? <ErrorState message={error ?? ''} onRetry={refresh} /> : (
+      {loading ? <LoadingState /> : !data ? <ErrorState message={error ?? ''} onRetry={refreshAll} /> : (
         <>
           {error ? <InlineError message={error} /> : null}
           <MetricGrid>
@@ -29,6 +35,14 @@ export default function DashboardScreen() {
             <MetricCard icon={ShieldAlert} label="Falhas críticas" value={data.summary.critical} tone="red" detail="nas últimas 24 horas" />
             <MetricCard icon={TriangleAlert} label="Falhas em 24h" value={data.summary.failures24h} tone="amber" detail="erros e eventos críticos" />
           </MetricGrid>
+          {timeline.data ? (
+            <OscillationChart
+              timeline={timeline.data}
+              title="Verificações da frota nas últimas 24 horas"
+              loading={timeline.loading}
+              onOpenPiece={pieceId => router.push(partHref(pieceId, { tab: 'log' }))}
+            />
+          ) : timeline.error ? <InlineError message={`Gráfico indisponível: ${timeline.error}`} /> : null}
           <Button title="Pesquisar peça" icon={Search} onPress={() => router.navigate('/search')} />
           <Card>
             <CardHeader

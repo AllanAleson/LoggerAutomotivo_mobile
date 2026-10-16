@@ -19,6 +19,15 @@ export interface Logger {
   firmwareVersion?: string; communicationMode?: string; batteryVoltage?: number; pendingEvents?: number
 }
 
+export interface TimelineBucket {
+  start: string; end: string; total: number; levels: Record<Level, number>
+  signals: { signal: string; pieceId: string | null; count: number }[]; peak: boolean
+}
+export interface Timeline {
+  start: string; end: string; bucketMinutes: number; buckets: TimelineBucket[]; peaks: number[]
+  stats: { mean: number; std: number; threshold: number; max: number; total: number }
+}
+
 export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, { signal })
   if (!response.ok) {

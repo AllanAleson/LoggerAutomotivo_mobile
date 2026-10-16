@@ -10,13 +10,13 @@ ESP32 / simulador -> REST API (Express) -> PostgreSQL/PGlite -> app mobile (Andr
 
 | Tela | O que faz |
 |---|---|
-| Dashboard | Loggers online/offline, falhas críticas e falhas em 24 h; ocorrências recentes com atalho para o diagnóstico |
+| Dashboard | Loggers online/offline, falhas críticas e falhas em 24 h; gráfico de verificações da frota com os picos de oscilação; ocorrências recentes com atalho para o diagnóstico |
 | Pesquisar | Busca por ID da peça, número de série ou Logger; abre o dispositivo |
 | Dispositivos | Loggers com status, peça associada, última comunicação, firmware, tensão e eventos pendentes |
 | Alertas | Ocorrências por prioridade, com filtro por severidade; cada alerta abre o diagnóstico daquela ocorrência |
 | Ajustes | Endereço da API (com teste de conexão) e referências operacionais (heartbeat, limite offline) |
 | Peça › Visão geral | Telemetria do Logger, última falha (esperado × recebido) e últimos eventos |
-| Peça › Log | Filtros por período (inclusive personalizado), severidade e evento; rolagem infinita; exportação CSV pela folha de compartilhamento |
+| Peça › Log | Filtros por período (inclusive personalizado), severidade e evento; gráfico de verificações com detalhamento do pico (toque em **Ver eventos deste intervalo**); rolagem infinita; exportação CSV pela folha de compartilhamento |
 | Peça › Diagnóstico | Falha mais relevante ou a ocorrência escolhida: esperado × recebido, possível causa e evidências |
 | Peça › Histórico | Falhas entre os 100 eventos mais recentes |
 

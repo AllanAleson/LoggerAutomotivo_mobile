@@ -83,3 +83,22 @@ export interface HealthResponse {
   timestamp: string
   offlineThresholdMinutes?: number
 }
+
+export interface TimelineBucket {
+  start: string
+  end: string
+  total: number
+  levels: Record<Level, number>
+  signals: { signal: string; pieceId: string | null; count: number }[]
+  peak: boolean
+}
+
+// GET /api/events/timeline: eventos por intervalo com os picos de oscilação marcados.
+export interface Timeline {
+  start: string
+  end: string
+  bucketMinutes: number
+  buckets: TimelineBucket[]
+  peaks: number[]
+  stats: { mean: number; std: number; threshold: number; max: number; total: number }
+}

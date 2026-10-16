@@ -47,4 +47,22 @@ export async function seed(db: Database) {
       `, [logger.rows[0].id, minutes, item.level, item.event, item.signal, item.expected, item.received, item.result, item.cause, JSON.stringify(item.evidence)])
     }
   }
+
+  // Cenário de oscilação para o gráfico de verificações: o sinal da trava (IN2)
+  // alterna 16 vezes em 4 minutos, como um mau contato faria no ESP32.
+  const oscillation = await db.query('SELECT 1 FROM events WHERE logger_id = $1 AND event = $2 LIMIT 1', [logger.rows[0].id, 'SIGNAL_OSCILLATION'])
+  if (!oscillation.rows[0]) {
+    const burstStartSeconds = 2 * 3600 + 30 * 60
+    for (let index = 0; index < 16; index++) {
+      await db.query(`
+        INSERT INTO events (logger_id, timestamp, level, event, signal, expected, received, result)
+        VALUES ($1, NOW() - ($2 * INTERVAL '1 second'), 'INFO', 'LOCK', 'IN2', '', $3, 'OK')
+      `, [logger.rows[0].id, burstStartSeconds - index * 15, index % 2 === 0 ? 'ACTIVE' : 'RELEASED'])
+    }
+    await db.query(`
+      INSERT INTO events (logger_id, timestamp, level, event, signal, expected, received, result, possible_cause, evidence)
+      VALUES ($1, NOW() - ($2 * INTERVAL '1 second'), 'WARNING', 'SIGNAL_OSCILLATION', 'IN2', 'Transição única', '16 transições em 4 min', 'WARNING',
+        'Possível mau contato no interruptor ou no chicote da trava.', $3::jsonb)
+    `, [logger.rows[0].id, burstStartSeconds - 16 * 15, JSON.stringify(['Sinal IN2 alternou entre ACTIVE e RELEASED a cada 15 s', 'Nenhum comando de trava correspondente', 'Logger permaneceu operacional'])])
+  }
 }

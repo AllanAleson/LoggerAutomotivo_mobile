@@ -80,11 +80,16 @@ O arquivo `docker-compose.yml` inclui um PostgreSQL opcional. Com Docker dispon�
 | GET | `/api/loggers` | Lista resumida de Loggers |
 | GET | `/api/loggers/:loggerId` | Detalhes de um Logger |
 | GET | `/api/alerts` | Alertas ordenados por prioridade |
+| GET | `/api/events/timeline` | Eventos por intervalo de tempo, da peça (`pieceId`) ou da frota, com os picos de oscilação marcados |
 | GET | `/api/events/:eventId` | Um evento específico (diagnóstico de uma ocorrência no app mobile) |
 | POST | `/api/events` | Ingestão de evento do Logger/ESP32 |
 | POST | `/api/loggers/:loggerId/heartbeat` | Atualização de presença e telemetria |
 
-Filtros de eventos: `level`, `event`, `startDate`, `endDate`, `limit` e `page`. Datas usam ISO 8601 com fuso. A exportação CSV aceita os mesmos filtros, exceto paginação, e limita cada arquivo a 10.000 registros.
+Filtros de eventos: `level`, `event`, `startDate`, `endDate`, `limit` e `page`. A linha do tempo aceita os mesmos filtros (sem paginação), além de `pieceId`, `hours` (ex.: últimas 24 h), `buckets` (colunas desejadas, padrão 24) e `utcOffset` (fuso do usuário em minutos, para alinhar os intervalos ao relógio local). Datas usam ISO 8601 com fuso. A exportação CSV aceita os mesmos filtros, exceto paginação, e limita cada arquivo a 10.000 registros.
+
+## Gráfico de verificações (picos de oscilação)
+
+O Dashboard (frota, últimas 24 h) e a aba **Log** da peça, no web e no app mobile, mostram um gráfico de colunas empilhadas: cada coluna é um intervalo de tempo e as cores separam a severidade (verificação OK em cinza; aviso, erro e crítico nas cores de status). Um **pico de oscilação** é um intervalo com volume acima de média + 2 desvios-padrão do período (mínimo de 3 eventos). Ele recebe um marcador, a linha tracejada mostra o limite e a lista de picos indica o sinal com mais registros, que é o principal suspeito de mau contato ou falha. Na aba Log, **Ver eventos deste intervalo** aplica o intervalo do pico como período e o gráfico se refaz em intervalos menores, até isolar o momento exato. O seed inclui um cenário de demonstração: o sinal IN2 alterna 16 vezes em 4 minutos.
 
 ## Integração do ESP32
 

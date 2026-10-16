@@ -11,7 +11,7 @@ import SearchScreen from '@/app/(tabs)/search'
 import SettingsScreen from '@/app/(tabs)/settings'
 import PartScreen from '@/app/parts/[pieceId]'
 
-import { installFetchMock, warningEvent } from '../test-utils/fixtures'
+import { installFetchMock, timeline, warningEvent } from '../test-utils/fixtures'
 
 jest.setTimeout(30_000)
 
@@ -121,6 +121,26 @@ describe('App mobile Logger Auto', () => {
     await fireEvent(input, 'submitEditing')
     expect(await screen.findByText('Informe uma URL válida, por exemplo http://192.168.0.10:3333')).toBeTruthy()
     expect(await AsyncStorage.getItem('logger-auto:api-url')).toBeNull()
+  })
+
+  it('mostra o gráfico de verificações da frota com o pico de oscilação', async () => {
+    await renderApp('/')
+    expect(await screen.findByText('Verificações da frota nas últimas 24 horas')).toBeTruthy()
+    expect(screen.getByText('1 pico de oscilação detectado')).toBeTruthy()
+    expect(screen.getByText('Pico de oscilação')).toBeTruthy()
+    expect(screen.getByText('17 registros')).toBeTruthy()
+    expect(requestedUrls().some(url => url.includes('/api/events/timeline?hours=24'))).toBe(true)
+  })
+
+  it('filtra o log pelo intervalo do pico escolhido no gráfico', async () => {
+    await renderApp('/parts/PT-00018429?tab=log')
+    expect(await screen.findByText('Gráfico de verificações')).toBeTruthy()
+    expect(requestedUrls().some(url => url.includes('/api/events/timeline?') && url.includes('pieceId=PT-00018429'))).toBe(true)
+    await fireEvent.press(screen.getByRole('button', { name: 'Ver eventos deste intervalo' }))
+    const peak = timeline.buckets[2]
+    await waitFor(() => expect(requestedUrls().some(url => url.includes('/api/parts/PT-00018429/events?')
+      && url.includes(`startDate=${encodeURIComponent(peak.start)}`) && url.includes(`endDate=${encodeURIComponent(peak.end)}`))).toBe(true))
+    expect(screen.getByRole('button', { name: 'Personalizado', selected: true })).toBeTruthy()
   })
 
   it('explica quando a API está inacessível', async () => {

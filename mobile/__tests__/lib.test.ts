@@ -3,6 +3,7 @@ import { csvFileName, withBom } from '@/lib/csv'
 import { buildEventParams, DEFAULT_EVENT_FILTERS, toQueryString } from '@/lib/event-query'
 import { formatDateTime, formatVoltage, orDash, plural, textOr, timeAgo } from '@/lib/format'
 import { parsePartTab, partHref } from '@/lib/routes'
+import { bucketLabel, largestPeak, niceMax, tickLabel } from '@/lib/timeline'
 
 describe('normalizeApiUrl', () => {
   it('aceita IP com porta e completa o esquema', () => {
@@ -122,5 +123,27 @@ describe('campos vazios enviados pelo firmware', () => {
     expect(textOr('HIGH', 'Não informado')).toBe('HIGH')
     expect(orDash('')).toBe('—')
     expect(orDash(0)).toBe('0')
+  })
+})
+
+describe('gráfico de verificações', () => {
+  it('escolhe um teto de eixo com metade inteira', () => {
+    expect(niceMax(17)).toBe(20)
+    expect(niceMax(3)).toBe(4)
+    expect(niceMax(7)).toBe(8)
+    expect(niceMax(0)).toBe(2)
+    expect(niceMax(140)).toBe(200)
+  })
+
+  it('descreve o intervalo e escolhe o maior pico', () => {
+    expect(bucketLabel(5)).toBe('5 min')
+    expect(bucketLabel(60)).toBe('1 h')
+    expect(bucketLabel(1440)).toBe('1 dia')
+    const local = new Date(2026, 9, 16, 8, 0, 0).toISOString()
+    expect(tickLabel(local, 60, false)).toBe('08:00')
+    expect(tickLabel(local, 1440, true)).toBe('16/10')
+    const buckets = [5, 17, 9].map(total => ({ start: local, end: local, total, levels: { INFO: total, WARNING: 0, ERROR: 0, CRITICAL: 0 }, signals: [], peak: true }))
+    expect(largestPeak(buckets, [0, 1, 2])).toBe(1)
+    expect(largestPeak(buckets, [])).toBeNull()
   })
 })

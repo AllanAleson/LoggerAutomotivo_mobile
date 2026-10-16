@@ -20,7 +20,7 @@ const initialState = <T,>(key: string | null): ApiState<T> =>
 // Busca um recurso da API e o mantém atualizado enquanto a tela estiver
 // visível. O polling pausa com a tela fora de foco ou o app em segundo plano
 // e recarrega imediatamente ao voltar, como o dashboard web faz a cada 15 s.
-export function useApi<T>(path: string | null, { refreshMs = 0 }: { refreshMs?: number } = {}) {
+export function useApi<T>(path: string | null, { refreshMs = 0, keepPrevious = false }: { refreshMs?: number; keepPrevious?: boolean } = {}) {
   const { baseUrl } = useApiConfig()
   const key = path ? `${baseUrl}${path}` : null
   const [state, setState] = useState<ApiState<T>>(() => initialState<T>(key))
@@ -30,8 +30,13 @@ export function useApi<T>(path: string | null, { refreshMs = 0 }: { refreshMs?: 
   const live = focused && appActive
   const wasLive = useRef(live)
 
-  // Novo endereço ou novo recurso: descarta os dados anteriores na mesma renderização.
-  if (state.key !== key) setState(initialState<T>(key))
+  // Novo endereço ou novo recurso: descarta os dados anteriores na mesma renderização,
+  // ou os mantém (keepPrevious) até a nova resposta chegar, como em gráficos.
+  if (state.key !== key) {
+    setState(keepPrevious && key !== null && state.data !== null
+      ? { ...state, key, loading: true, error: null }
+      : initialState<T>(key))
+  }
 
   const load = useCallback(async (mode: 'initial' | 'refresh' | 'poll') => {
     if (!path) return

@@ -4,6 +4,7 @@ import request from 'supertest'
 import { createApp } from '../src/app.js'
 import { createDatabase, migrate, type Database } from '../src/database.js'
 import { seed } from '../src/seed.js'
+import { alignStart, detectPeaks, pickBucketMinutes } from '../src/timeline.js'
 
 let db: Database
 let app: ReturnType<typeof createApp>
@@ -101,6 +102,56 @@ describe('API Logger Automotivo', () => {
     const response = await request(app).get('/api/health').expect(200)
     assert.equal(response.body.status, 'ok')
     assert.equal(typeof response.body.offlineThresholdMinutes, 'number')
+  })
+
+  it('agrupa eventos da peça por intervalo e marca o pico de oscilação', async () => {
+    const startDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+    const response = await request(app).get('/api/events/timeline').query({ pieceId: 'PT-00018429', startDate, utcOffset: -180 }).expect(200)
+    assert.equal(response.body.bucketMinutes, 60)
+    assert.ok(response.body.buckets.length >= 24 && response.body.buckets.length <= 26)
+    const total = response.body.buckets.reduce((sum: number, bucket: { total: number }) => sum + bucket.total, 0)
+    assert.equal(total, response.body.stats.total)
+    assert.equal(response.body.peaks.length, 1)
+    const peak = response.body.buckets[response.body.peaks[0]]
+    assert.equal(peak.peak, true)
+    assert.ok(peak.total >= 17)
+    assert.equal(peak.levels.WARNING, 1)
+    assert.deepEqual(peak.signals[0], { signal: 'IN2', pieceId: 'PT-00018429', count: 17 })
+    assert.ok(peak.total > response.body.stats.threshold)
+  })
+
+  it('aplica os filtros da consulta na linha do tempo e cobre a frota inteira', async () => {
+    const errors = await request(app).get('/api/events/timeline').query({ pieceId: 'PT-00018429', level: 'ERROR' }).expect(200)
+    assert.ok(errors.body.buckets.every((bucket: { levels: Record<string, number>; total: number }) => bucket.total === bucket.levels.ERROR))
+    assert.ok(errors.body.stats.total >= 2)
+    const fleet = await request(app).get('/api/events/timeline').query({ startDate: new Date(Date.now() - 3600_000).toISOString() }).expect(200)
+    assert.ok(fleet.body.bucketMinutes <= 5)
+    const lastDay = await request(app).get('/api/events/timeline').query({ hours: 24 }).expect(200)
+    assert.equal(lastDay.body.bucketMinutes, 60)
+    assert.equal(lastDay.body.peaks.length, 1)
+    await request(app).get('/api/events/timeline').query({ pieceId: 'INEXISTENTE' }).expect(404)
+    await request(app).get('/api/events/timeline').query({ startDate: 'ontem' }).expect(400)
+  })
+})
+
+describe('detecção de picos', () => {
+  it('escolhe intervalos redondos e alinha ao relógio local', () => {
+    assert.equal(pickBucketMinutes(24 * 3600_000, 24), 60)
+    assert.equal(pickBucketMinutes(3600_000, 30), 2)
+    assert.equal(pickBucketMinutes(30 * 24 * 3600_000, 30), 1440)
+    const brasilia = -180
+    const aligned = alignStart(Date.parse('2026-10-07T14:37:00Z'), 24 * 3600_000, brasilia)
+    assert.equal(new Date(aligned).toISOString(), '2026-10-07T03:00:00.000Z')
+  })
+
+  it('marca como pico só o intervalo muito acima da média', () => {
+    const values = [1, 0, 2, 1, 0, 1, 14, 1, 0, 2, 1, 1]
+    const result = detectPeaks(values)
+    assert.deepEqual(result.peaks, [6])
+    assert.ok(result.threshold > 2 && result.threshold < 14)
+    assert.deepEqual(detectPeaks([0, 0, 2, 0]).peaks, [])
+    assert.deepEqual(detectPeaks([3, 3, 3, 3]).peaks, [])
+    assert.deepEqual(detectPeaks([]).peaks, [])
   })
 })
 

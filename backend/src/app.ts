@@ -2,6 +2,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import cors from 'cors'
 import { z } from 'zod'
 import type { Database } from './database.js'
+import { alignStart, buildTimeline, pickBucketMinutes, type TimelineRow } from './timeline.js'
 
 const eventSchema = z.object({
   loggerId: z.string().trim().min(1).max(80),
@@ -176,6 +177,59 @@ export function createApp(db: Database) {
     const limit = positiveInt(req.query.limit, 100, 500)
     const result = await db.query<Record<string, unknown>>(`SELECT ${eventColumns} FROM events e JOIN loggers l ON l.id=e.logger_id LEFT JOIN part_logger_assignments a ON a.logger_id=l.id AND a.unassigned_at IS NULL LEFT JOIN parts p ON p.id=a.part_id WHERE e.level IN ('WARNING','ERROR','CRITICAL') ORDER BY CASE e.level WHEN 'CRITICAL' THEN 1 WHEN 'ERROR' THEN 2 ELSE 3 END, e.timestamp DESC LIMIT $1`, [limit])
     res.json({ items: result.rows, count: result.rows.length })
+  })
+
+  // Eventos por intervalo de tempo, da peça (pieceId) ou de toda a frota, com os
+  // picos de oscilação marcados. Aceita os mesmos filtros da consulta de eventos.
+  app.get('/api/events/timeline', async (req, res) => {
+    const pieceId = req.query.pieceId ? String(req.query.pieceId) : null
+    if (pieceId) {
+      const exists = await db.query<{ id: string }>('SELECT id FROM parts WHERE piece_id=$1', [pieceId])
+      if (!exists.rows[0]) return res.status(404).json({ error: 'Peça não encontrada.' })
+    }
+    const parseDate = (value: unknown) => value ? Date.parse(String(value)) : undefined
+    const startParam = parseDate(req.query.startDate)
+    const endParam = parseDate(req.query.endDate)
+    if (Number.isNaN(startParam) || Number.isNaN(endParam)) return res.status(400).json({ error: 'Datas inválidas. Use ISO 8601 com fuso.' })
+
+    const scope = pieceId
+      ? 'FROM events e JOIN loggers l ON l.id=e.logger_id JOIN part_logger_assignments a ON a.logger_id=l.id JOIN parts p ON p.id=a.part_id WHERE p.piece_id=$1 AND e.timestamp >= a.assigned_at AND (a.unassigned_at IS NULL OR e.timestamp <= a.unassigned_at)'
+      : 'FROM events e JOIN loggers l ON l.id=e.logger_id LEFT JOIN part_logger_assignments a ON a.logger_id=l.id AND a.unassigned_at IS NULL LEFT JOIN parts p ON p.id=a.part_id WHERE TRUE'
+    const scopeParams = pieceId ? [pieceId] : []
+    const filter = eventFilter(req.query, scopeParams.length + 1)
+    const params = [...scopeParams, ...filter.params]
+
+    const end = endParam ?? Date.now()
+    const hours = Number(req.query.hours)
+    let start = startParam ?? (Number.isFinite(hours) && hours > 0 ? end - Math.min(hours, 24 * 366) * 3600_000 : undefined)
+    if (start === undefined) {
+      const first = await db.query<{ first: Date | string | null }>(`SELECT MIN(e.timestamp) AS first ${scope} ${filter.sql}`, params)
+      const firstMs = first.rows[0]?.first ? new Date(first.rows[0].first).getTime() : NaN
+      start = Number.isFinite(firstMs) ? Math.min(firstMs, end - 60 * 60_000) : end - 24 * 60 * 60_000
+    }
+    if (start > end) return res.status(400).json({ error: 'A data inicial deve ser anterior à final.' })
+
+    const target = Math.max(6, positiveInt(req.query.buckets, 24, 60))
+    const bucketMinutes = pickBucketMinutes(Math.max(end - start, 60_000), target)
+    const bucketMs = bucketMinutes * 60_000
+    const utcOffset = Math.max(-840, Math.min(840, Math.trunc(Number(req.query.utcOffset) || 0)))
+    const origin = alignStart(start, bucketMs, utcOffset)
+    const bucketCount = Math.min(200, Math.max(1, Math.ceil((end - origin) / bucketMs)))
+
+    const n = params.length
+    const rows = await db.query<TimelineRow>(`
+      SELECT FLOOR((EXTRACT(EPOCH FROM e.timestamp) * 1000 - $${n + 1}::double precision) / $${n + 2}::double precision)::int AS idx,
+        e.level, COALESCE(NULLIF(TRIM(e.signal), ''), e.event) AS signal, p.piece_id AS "pieceId", COUNT(*)::int AS count
+      ${scope} ${filter.sql} AND e.timestamp >= $${n + 3}::timestamptz AND e.timestamp <= $${n + 4}::timestamptz
+      GROUP BY 1, 2, 3, 4
+    `, [...params, origin, bucketMs, new Date(start).toISOString(), new Date(end).toISOString()])
+
+    res.json({
+      start: new Date(origin).toISOString(),
+      end: new Date(end).toISOString(),
+      bucketMinutes,
+      ...buildTimeline({ rows: rows.rows, origin, bucketMs, bucketCount }),
+    })
   })
 
   app.get('/api/events/:eventId', async (req, res) => {

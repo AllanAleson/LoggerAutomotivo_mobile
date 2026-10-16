@@ -1,4 +1,4 @@
-import type { EventItem, Logger, Part } from '@/api/types'
+import type { EventItem, Logger, Part, Timeline } from '@/api/types'
 
 const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
 
@@ -79,6 +79,32 @@ export const logger: Logger = {
   pendingEvents: 0,
 }
 
+
+const hourMs = 3600_000
+const bucketStart = Date.parse('2026-10-16T08:00:00.000Z')
+const bucket = (index: number, levels: Partial<Record<'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL', number>>, peak = false) => {
+  const full = { INFO: 0, WARNING: 0, ERROR: 0, CRITICAL: 0, ...levels }
+  const total = full.INFO + full.WARNING + full.ERROR + full.CRITICAL
+  return {
+    start: new Date(bucketStart + index * hourMs).toISOString(),
+    end: new Date(bucketStart + (index + 1) * hourMs).toISOString(),
+    total,
+    levels: full,
+    signals: total ? [{ signal: peak ? 'IN2' : 'SYSTEM', pieceId: 'PT-00018429', count: total }] : [],
+    peak,
+  }
+}
+
+// Linha do tempo com um pico de oscilação do sinal IN2 no terceiro intervalo.
+export const timeline: Timeline = {
+  start: new Date(bucketStart).toISOString(),
+  end: new Date(bucketStart + 6 * hourMs).toISOString(),
+  bucketMinutes: 60,
+  buckets: [bucket(0, { INFO: 1 }), bucket(1, {}), bucket(2, { INFO: 16, WARNING: 1 }, true), bucket(3, { ERROR: 1 }), bucket(4, {}), bucket(5, { INFO: 1 })],
+  peaks: [2],
+  stats: { mean: 3.3, std: 6.1, threshold: 15.5, max: 17, total: 20 },
+}
+
 const allEvents = [lockEvent, timeoutEvent, warningEvent]
 
 // Simula a API do backend a partir da URL requisitada.
@@ -87,6 +113,7 @@ export function apiResponse(url: string): { status: number; body: unknown } {
   const params = Object.fromEntries(query.split('&').filter(Boolean).map(pair => pair.split('=').map(decodeURIComponent)))
   if (path === '/api/health') return { status: 200, body: { status: 'ok', database: 'pglite', timestamp: new Date().toISOString(), offlineThresholdMinutes: 10 } }
   if (path === '/api/dashboard') return { status: 200, body: { summary: { online: 1, offline: 0, warning: 0, critical: 0, failures24h: 1 }, recentEvents: [timeoutEvent, warningEvent] } }
+  if (path === '/api/events/timeline') return { status: 200, body: timeline }
   if (path === '/api/alerts') return { status: 200, body: { items: [timeoutEvent, warningEvent], count: 2 } }
   if (path === '/api/loggers') return { status: 200, body: { items: [logger], count: 1 } }
   if (path === '/api/parts') {

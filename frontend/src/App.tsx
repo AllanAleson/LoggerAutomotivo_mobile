@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, NavLink, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Activity, AlertTriangle, Battery, Bell, ChevronRight, CircleGauge, Clock3, CloudDownload, Cpu, Database, Gauge, History, Info, LayoutDashboard, Menu, Radio, RefreshCw, Search, Settings, ShieldAlert, Signal, SlidersHorizontal, Wrench, X, XCircle } from 'lucide-react'
-import { API_URL, getJson, type EventItem, type Level, type Logger, type Part, type Status } from './api'
+import { API_URL, getJson, type EventItem, type Level, type Logger, type Part, type Status, type Timeline, type TimelineBucket } from './api'
+import { OscillationChart } from './OscillationChart'
+import { utcOffsetMinutes } from './timeline'
 
 const dateTime = (value?: string | null) => value ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'medium' }).format(new Date(value)) : 'Sem comunicação'
 
@@ -77,6 +79,7 @@ function Home() {
       <Metric icon={<ShieldAlert />} label="Falhas críticas" value={data?.summary.critical ?? 0} tone="red" detail="nas últimas 24 horas" />
       <Metric icon={<AlertTriangle />} label="Falhas em 24h" value={data?.summary.failures24h ?? 0} tone="amber" detail="erros e eventos críticos" />
     </div>
+    <TimelinePanel path={`/api/events/timeline?hours=24&utcOffset=${utcOffsetMinutes()}`} refreshMs={15000} title="Verificações da frota nas últimas 24 horas" showPieceLinks />
     <div className="panel"><div className="panel-head"><div><h2>Ocorrências recentes</h2><p>Eventos relevantes, sem o ruído dos registros informativos.</p></div><Link to="/alerts">Ver alertas <ChevronRight /></Link></div>
       {data?.recentEvents.length ? <div className="event-list">{data.recentEvents.map(e => <EventRow key={e.id} event={e} />)}</div> : <div className="mini-empty">Nenhuma ocorrência relevante.</div>}
     </div></State>
@@ -144,11 +147,21 @@ function Overview({ part }: { part: Part }) {
   </div>
 }
 
+const pad = (value: number) => String(value).padStart(2, '0')
+// Formato de <input type="datetime-local"> no horário local.
+const toLocalInput = (iso: string) => { const d = new Date(iso); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}` }
+
+function TimelinePanel({ path, title, refreshMs = 0, onApplyRange, showPieceLinks = false }: { path: string; title: string; refreshMs?: number; onApplyRange?: (bucket: TimelineBucket) => void; showPieceLinks?: boolean }) {
+  const { data, error, loading } = useApi<Timeline>(path, refreshMs)
+  if (!data) return <div className="panel chart-panel"><div className="mini-empty">{error ? `Gráfico indisponível: ${error}` : 'Carregando gráfico...'}</div></div>
+  return <OscillationChart timeline={data} title={title} loading={loading} onApplyRange={onApplyRange} showPieceLinks={showPieceLinks} />
+}
+
 function LogTab({ pieceId }: { pieceId: string }) {
   const [period, setPeriod] = useState('24h'), [level, setLevel] = useState(''), [event, setEvent] = useState(''), [page, setPage] = useState(1)
   const [start, setStart] = useState(''), [end, setEnd] = useState('')
-  const query = useMemo(() => {
-    const next = new URLSearchParams({ limit: '25', page: String(page) })
+  const filters = useMemo(() => {
+    const next = new URLSearchParams()
     if (level) next.set('level', level)
     if (event) next.set('event', event)
     const ago = period === '1h' ? 1 : period === '24h' ? 24 : period === '7d' ? 168 : period === '30d' ? 720 : 0
@@ -156,10 +169,15 @@ function LogTab({ pieceId }: { pieceId: string }) {
     if (period === 'custom' && start) next.set('startDate', new Date(start).toISOString())
     if (period === 'custom' && end) next.set('endDate', new Date(end).toISOString())
     return next
-  }, [end, event, level, page, period, start])
+  }, [end, event, level, period, start])
+  const query = useMemo(() => { const next = new URLSearchParams(filters); next.set('limit', '25'); next.set('page', String(page)); return next }, [filters, page])
+  const timelinePath = useMemo(() => { const next = new URLSearchParams(filters); next.set('pieceId', pieceId); next.set('utcOffset', String(utcOffsetMinutes())); return `/api/events/timeline?${next}` }, [filters, pieceId])
   const { data, error, loading } = useApi<{ items: EventItem[]; count: number; limit: number }>(`/api/parts/${pieceId}/events?${query}`)
-  const download = () => { const exportQuery = new URLSearchParams(query); exportQuery.delete('page'); exportQuery.delete('limit'); window.location.href = `${API_URL}/api/parts/${encodeURIComponent(pieceId)}/events/export?${exportQuery}` }
+  const download = () => { window.location.href = `${API_URL}/api/parts/${encodeURIComponent(pieceId)}/events/export?${filters}` }
+  // Clique no gráfico: o intervalo da coluna vira o período personalizado do log.
+  const applyRange = (bucket: TimelineBucket) => { setPeriod('custom'); setStart(toLocalInput(bucket.start)); setEnd(toLocalInput(bucket.end)); setPage(1) }
   return <div className="tab-content"><div className="panel filters"><div className="filter-head"><div><SlidersHorizontal /><div><h2>Consulta de eventos</h2><p>Filtre o período e a severidade dos registros.</p></div></div><button className="button primary" onClick={download}><CloudDownload />Download log</button></div><div className="filter-grid"><label>Período<select value={period} onChange={e => { setPeriod(e.target.value); setPage(1) }}><option value="1h">Última hora</option><option value="24h">Últimas 24 horas</option><option value="7d">Últimos 7 dias</option><option value="30d">Últimos 30 dias</option><option value="all">Todo o período</option><option value="custom">Personalizado</option></select></label><label>Severidade<select value={level} onChange={e => { setLevel(e.target.value); setPage(1) }}><option value="">Todas</option><option>INFO</option><option>WARNING</option><option>ERROR</option><option>CRITICAL</option></select></label><label>Evento<input value={event} onChange={e => { setEvent(e.target.value); setPage(1) }} placeholder="Ex.: TIMEOUT" /></label>{period === 'custom' && <><label>Início<input type="datetime-local" value={start} onChange={e => setStart(e.target.value)} /></label><label>Fim<input type="datetime-local" value={end} onChange={e => setEnd(e.target.value)} /></label></>}</div></div>
+    <TimelinePanel path={timelinePath} title="Gráfico de verificações" onApplyRange={applyRange} />
     <State loading={loading} error={error} empty={!data?.items.length}><div className="panel table-wrap"><div className="table-title"><b>{data?.count ?? 0} registros</b><span>Página {page}</span></div><table><thead><tr><th>Data/hora</th><th>Nível</th><th>Evento</th><th>Sinal</th><th>Esperado</th><th>Recebido</th><th>Resultado</th><th>Possível causa</th></tr></thead><tbody>{data?.items.map(x => <tr key={x.id}><td className="nowrap">{dateTime(x.timestamp)}</td><td><Badge value={x.level} /></td><td><b>{x.event}</b></td><td>{x.signal ?? '—'}</td><td>{x.expected ?? '—'}</td><td>{x.received ?? '—'}</td><td className={x.result === 'FAIL' ? 'result-fail' : 'result-ok'}>{x.result ?? '—'}</td><td className="cause-cell">{x.possibleCause ?? '—'}</td></tr>)}</tbody></table><div className="pagination"><button disabled={page === 1} onClick={() => setPage(x => x - 1)}>Anterior</button><span>{(page - 1) * 25 + 1}–{Math.min(page * 25, data?.count ?? 0)} de {data?.count}</span><button disabled={page * 25 >= (data?.count ?? 0)} onClick={() => setPage(x => x + 1)}>Próxima</button></div></div></State>
   </div>
 }
